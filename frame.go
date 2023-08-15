@@ -25,8 +25,8 @@ type FrameReader struct {
 	NeedMaskSet bool
 }
 
-// NewFrame replace the frame with the new coming frame
-func (fr *FrameReader) NewFrame() (err error) {
+// ReadFrame replace the frame with the new coming frame
+func (fr *FrameReader) ReadFrame() (err error) {
 	frame := Frame{}
 
 	b, err := fr.buf.ReadByte()
@@ -77,10 +77,13 @@ func (fr *FrameReader) NewFrame() (err error) {
 		}
 	}
 
-	if fr.frame != nil && !fr.frame.Fin && frame.OpCode != PayloadTypeContinue {
-		// this frame must be continue-frame
-		return ErrUnexpectedFrame
+	if !isControlFrame(fr.frame.OpCode) {
+		if fr.frame != nil && !fr.frame.Fin && frame.OpCode != PayloadTypeContinue {
+			// this frame must be continue-frame
+			return ErrUnexpectedFrame
+		}
 	}
+
 	fr.frame = &frame
 
 	// decode byte read from buf
@@ -113,31 +116,6 @@ func (fr *FrameReader) Decode() (err error) {
 	return
 }
 
-// 从buf reader读取字节流生成frame，然后从frame的buffer读取
-func (fr *FrameReader) Read(p []byte) (n int, err error) {
-	for {
-		if fr.frame != nil && fr.frame.Data != nil {
-			// read from buffer first
-			var cnt int
-			cnt, err = fr.frame.Data.Read(p[n:])
-			n += cnt
-
-			if n == len(p) {
-				return
-			}
-		}
-
-		// read the next frame from buf
-		err = fr.NewFrame()
-		if err == ErrNoNewFrame {
-			if n > 0 {
-				return n, nil
-			}
-			return 0, io.EOF
-		}
-	}
-}
-
 type FrameWriter struct {
 	frame        *Frame
 	buf          *bufio.Writer
@@ -145,7 +123,7 @@ type FrameWriter struct {
 	MaxFrameSize int
 }
 
-func (fw *FrameWriter) WriteToBuf() (err error) {
+func (fw *FrameWriter) WriteFrame() (err error) {
 	b := byte(1) << 7
 	if !fw.frame.Fin {
 		b = 0
@@ -233,7 +211,7 @@ func (fw *FrameWriter) Write(p []byte) (n int, err error) {
 		frame.Data = bf
 		fw.frame = frame
 
-		err = fw.WriteToBuf()
+		err = fw.WriteFrame()
 		if err != nil {
 			return
 		}

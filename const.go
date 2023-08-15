@@ -18,6 +18,7 @@ const (
 	PayloadTypeContinue byte = 0x0
 	PayloadTypeText     byte = 0x1
 	PayloadTypeBinary   byte = 0x2
+	PayloadTypeClose    byte = 0x8
 	PayloadTypePing     byte = 0x9
 	PayloadTypePong     byte = 0xa
 )
