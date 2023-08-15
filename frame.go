@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"io"
 	"math"
-	"math/rand"
 )
 
 type Frame struct {
@@ -74,13 +73,6 @@ func (fr *FrameReader) ReadFrame() (err error) {
 		_, err = fr.buf.Read(frame.MaskKey[:])
 		if err != nil {
 			return
-		}
-	}
-
-	if !isControlFrame(fr.frame.OpCode) {
-		if fr.frame != nil && !fr.frame.Fin && frame.OpCode != PayloadTypeContinue {
-			// this frame must be continue-frame
-			return ErrUnexpectedFrame
 		}
 	}
 
@@ -174,48 +166,4 @@ func (fw *FrameWriter) WriteFrame() (err error) {
 		return
 	}
 	return fw.buf.Flush()
-}
-
-func (fw *FrameWriter) Write(p []byte) (n int, err error) {
-	size := fw.MaxFrameSize
-	if size <= 0 {
-		size = DefaultFrameSize
-	}
-	pSize := len(p)
-	for n < pSize {
-		// generate new frame, compute the frame size
-		if pSize-n < size {
-			size = pSize - n
-		}
-		frame := &Frame{
-			Fin:        (n + size) >= pSize,
-			Rsv:        [3]bool{},
-			OpCode:     PayloadTypeText,
-			Mask:       fw.NeedMaskSet,
-			PayloadLen: uint64(size),
-			MaskKey:    [4]byte{},
-			Data:       nil,
-		}
-		if frame.Mask {
-			// generate random mask key
-			binary.BigEndian.PutUint32(frame.MaskKey[:4], rand.Uint32())
-		}
-		bf := bytes.NewBuffer(nil)
-		for i := 0; i < size; i++ {
-			if frame.Mask {
-				bf.WriteByte(p[n+i] ^ frame.MaskKey[i%4])
-			} else {
-				bf.WriteByte(p[n+i])
-			}
-		}
-		frame.Data = bf
-		fw.frame = frame
-
-		err = fw.WriteFrame()
-		if err != nil {
-			return
-		}
-		n += size
-	}
-	return n, nil
 }
