@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"github.com/cmz2012/websocket"
 	"github.com/sirupsen/logrus"
-	"io"
 	"net/http"
 )
 
-func HandConn(rwc io.ReadWriteCloser) {
+func HandConn(rwc websocket.Conn) {
 	defer rwc.Close()
 	msg := make([]byte, 10)
+	rwc.WriteControl(websocket.PayloadTypePing, "this is a ping frame")
 	n, err := rwc.Read(msg)
 	fmt.Printf("ReadString: %v, %v, %v\n", string(msg), err, n)
 	n, err = rwc.Write([]byte("hello, client!"))

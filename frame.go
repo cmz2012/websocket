@@ -4,9 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"github.com/sirupsen/logrus"
 	"io"
 	"math"
-	"math/rand"
 )
 
 type Frame struct {
@@ -25,8 +25,8 @@ type FrameReader struct {
 	NeedMaskSet bool
 }
 
-// NewFrame replace the frame with the new coming frame
-func (fr *FrameReader) NewFrame() (err error) {
+// ReadFrame replace the frame with the new coming frame
+func (fr *FrameReader) ReadFrame() (err error) {
 	frame := Frame{}
 
 	b, err := fr.buf.ReadByte()
@@ -77,10 +77,6 @@ func (fr *FrameReader) NewFrame() (err error) {
 		}
 	}
 
-	if fr.frame != nil && !fr.frame.Fin && frame.OpCode != PayloadTypeContinue {
-		// this frame must be continue-frame
-		return ErrUnexpectedFrame
-	}
 	fr.frame = &frame
 
 	// decode byte read from buf
@@ -88,6 +84,7 @@ func (fr *FrameReader) NewFrame() (err error) {
 	if err != nil {
 		return
 	}
+	logrus.Infof("[ReadFrame]: data = %v", fr.frame.Data.String())
 
 	return
 }
@@ -113,29 +110,8 @@ func (fr *FrameReader) Decode() (err error) {
 	return
 }
 
-// 从buf reader读取字节流生成frame，然后从frame的buffer读取
-func (fr *FrameReader) Read(p []byte) (n int, err error) {
-	for {
-		if fr.frame != nil && fr.frame.Data != nil {
-			// read from buffer first
-			var cnt int
-			cnt, err = fr.frame.Data.Read(p[n:])
-			n += cnt
-
-			if n == len(p) {
-				return
-			}
-		}
-
-		// read the next frame from buf
-		err = fr.NewFrame()
-		if err == ErrNoNewFrame {
-			if n > 0 {
-				return n, nil
-			}
-			return 0, io.EOF
-		}
-	}
+func (fr *FrameReader) clear() {
+	fr.frame = nil
 }
 
 type FrameWriter struct {
@@ -145,7 +121,9 @@ type FrameWriter struct {
 	MaxFrameSize int
 }
 
-func (fw *FrameWriter) WriteToBuf() (err error) {
+func (fw *FrameWriter) WriteFrame() (err error) {
+	logrus.Infof("[WriteFrame]: data = %v", fw.frame.Data.String())
+
 	b := byte(1) << 7
 	if !fw.frame.Fin {
 		b = 0
@@ -196,48 +174,4 @@ func (fw *FrameWriter) WriteToBuf() (err error) {
 		return
 	}
 	return fw.buf.Flush()
-}
-
-func (fw *FrameWriter) Write(p []byte) (n int, err error) {
-	size := fw.MaxFrameSize
-	if size <= 0 {
-		size = DefaultFrameSize
-	}
-	pSize := len(p)
-	for n < pSize {
-		// generate new frame, compute the frame size
-		if pSize-n < size {
-			size = pSize - n
-		}
-		frame := &Frame{
-			Fin:        (n + size) >= pSize,
-			Rsv:        [3]bool{},
-			OpCode:     PayloadTypeText,
-			Mask:       fw.NeedMaskSet,
-			PayloadLen: uint64(size),
-			MaskKey:    [4]byte{},
-			Data:       nil,
-		}
-		if frame.Mask {
-			// generate random mask key
-			binary.BigEndian.PutUint32(frame.MaskKey[:4], rand.Uint32())
-		}
-		bf := bytes.NewBuffer(nil)
-		for i := 0; i < size; i++ {
-			if frame.Mask {
-				bf.WriteByte(p[n+i] ^ frame.MaskKey[i%4])
-			} else {
-				bf.WriteByte(p[n+i])
-			}
-		}
-		frame.Data = bf
-		fw.frame = frame
-
-		err = fw.WriteToBuf()
-		if err != nil {
-			return
-		}
-		n += size
-	}
-	return n, nil
 }
