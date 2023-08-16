@@ -18,7 +18,6 @@ type Conn struct {
 	pingHandle  func(msg []byte) error
 	pongHandle  func(msg []byte) error
 	closeHandle func(msg []byte) error
-	frame       chan *Frame
 }
 
 // 从buf reader读取字节流生成frame，然后从frame的buffer读取
