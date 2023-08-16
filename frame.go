@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"github.com/sirupsen/logrus"
 	"io"
 	"math"
 )
@@ -83,6 +84,7 @@ func (fr *FrameReader) ReadFrame() (err error) {
 	if err != nil {
 		return
 	}
+	logrus.Infof("[ReadFrame]: frame = %v, data = %v", *fr.frame, fr.frame.Data.String())
 
 	return
 }
@@ -108,6 +110,10 @@ func (fr *FrameReader) Decode() (err error) {
 	return
 }
 
+func (fr *FrameReader) clear() {
+	fr.frame = nil
+}
+
 type FrameWriter struct {
 	frame        *Frame
 	buf          *bufio.Writer
@@ -116,6 +122,8 @@ type FrameWriter struct {
 }
 
 func (fw *FrameWriter) WriteFrame() (err error) {
+	logrus.Infof("[WriteFrame]: frame = %v, data = %v", *fw.frame, fw.frame.Data.String())
+
 	b := byte(1) << 7
 	if !fw.frame.Fin {
 		b = 0

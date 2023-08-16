@@ -49,6 +49,7 @@ func (c Conn) Read(p []byte) (n int, err error) {
 
 		if isControlFrame(c.r.frame.OpCode) {
 			c.handleControl()
+			c.r.clear()
 		}
 	}
 }
@@ -84,7 +85,8 @@ func (c Conn) handleControl() {
 			logrus.Infof("[handleControl]: default pong handler is nil")
 		}
 	case PayloadTypeClose:
-		logrus.Infof("[handleControl]: receive close frame msg = %v", string(c.r.frame.Data.Bytes()))
+		code, msg := DecodeCloseMessage(c.r.frame.Data.Bytes())
+		logrus.Infof("[handleControl]: receive close frame code = %v, msg = %v", code, msg)
 		if c.closeHandle != nil {
 			c.closeHandle(c.r.frame.Data.Bytes())
 		} else {
@@ -102,8 +104,8 @@ func (c Conn) handleControl() {
 			if closeErr != nil {
 				logrus.Errorf("[handleControl]: write close frame err = %v", closeErr)
 			}
-			c.Close()
 		}
+		c.Close()
 	default:
 		panic("unsupported payload type")
 	}
@@ -160,7 +162,7 @@ func (c Conn) WriteControl(payloadType byte, msg string) (err error) {
 	c.w.frame = &Frame{
 		Fin:        true,
 		Rsv:        [3]bool{},
-		OpCode:     PayloadTypeClose,
+		OpCode:     payloadType,
 		Mask:       false,
 		PayloadLen: uint64(len(msg)),
 		MaskKey:    [4]byte{},
@@ -202,4 +204,14 @@ func FormatCloseMessage(closeCode int, text string) []byte {
 	binary.BigEndian.PutUint16(buf, uint16(closeCode))
 	copy(buf[2:], text)
 	return buf
+}
+
+func DecodeCloseMessage(payload []byte) (code int, msg string) {
+	code = CloseNoStatusReceived
+	msg = ""
+	if len(payload) >= 2 {
+		code = int(binary.BigEndian.Uint16(payload))
+		msg = string(payload[2:])
+	}
+	return
 }
