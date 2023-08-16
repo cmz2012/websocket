@@ -3,6 +3,7 @@ package websocket
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"github.com/sirupsen/logrus"
 	"io"
 	"math/rand"
@@ -152,6 +153,28 @@ func (c Conn) Write(p []byte) (n int, err error) {
 	return n, nil
 }
 
+func (c Conn) WriteControl(payloadType byte, msg string) (err error) {
+	if !isControlFrame(payloadType) {
+		return errors.New("not control frame")
+	}
+	c.w.frame = &Frame{
+		Fin:        true,
+		Rsv:        [3]bool{},
+		OpCode:     PayloadTypeClose,
+		Mask:       false,
+		PayloadLen: uint64(len(msg)),
+		MaskKey:    [4]byte{},
+		Data:       nil,
+	}
+	if payloadType == PayloadTypeClose {
+		c.w.frame.Data = bytes.NewBuffer(FormatCloseMessage(CloseNormalClosure, msg))
+	} else {
+		c.w.frame.Data = bytes.NewBuffer([]byte(msg))
+	}
+	err = c.w.WriteFrame()
+	return
+}
+
 func (c Conn) Close() error {
 	return c.nc.Close()
 }
@@ -167,7 +190,6 @@ func (c Conn) SetPongHandle(f func(msg []byte) error) {
 func (c Conn) SetCloseHandle(f func(msg []byte) error) {
 	c.closeHandle = f
 }
-
 
 func FormatCloseMessage(closeCode int, text string) []byte {
 	if closeCode == CloseNoStatusReceived {

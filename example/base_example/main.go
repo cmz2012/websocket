@@ -4,11 +4,10 @@ import (
 	"fmt"
 	"github.com/cmz2012/websocket"
 	"github.com/sirupsen/logrus"
-	"io"
 	"net/http"
 )
 
-func HandConn(rwc io.ReadWriteCloser) {
+func HandConn(rwc websocket.Conn) {
 	defer rwc.Close()
 	msg := make([]byte, 10)
 	n, err := rwc.Read(msg)
