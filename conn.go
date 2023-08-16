@@ -47,59 +47,64 @@ func (c Conn) Read(p []byte) (n int, err error) {
 		}
 
 		if isControlFrame(c.r.frame.OpCode) {
-			switch c.r.frame.OpCode {
-			case PayloadTypePing:
-				logrus.Infof("[ReadFrame]: receive ping frame msg = %v", string(c.r.frame.Data.Bytes()))
-				if c.pingHandle != nil {
-					c.pingHandle(c.r.frame.Data.Bytes())
-				} else {
-					c.w.frame = &Frame{
-						Fin:        true,
-						Rsv:        [3]bool{},
-						OpCode:     PayloadTypePong,
-						Mask:       false,
-						PayloadLen: uint64(c.r.frame.Data.Len()),
-						MaskKey:    [4]byte{},
-						Data:       c.r.frame.Data,
-					}
-					pongErr := c.w.WriteFrame()
-					if pongErr != nil {
-						logrus.Errorf("[ReadFrame]: write pong frame err = %v", pongErr)
-					}
-				}
-			case PayloadTypePong:
-				logrus.Infof("[ReadFrame]: receive pong frame msg = %v", string(c.r.frame.Data.Bytes()))
-				if c.pongHandle != nil {
-					c.pongHandle(c.r.frame.Data.Bytes())
-				} else {
+			c.handleControl()
+		}
+	}
+}
 
-				}
-			case PayloadTypeClose:
-				logrus.Infof("[ReadFrame]: receive close frame msg = %v", string(c.r.frame.Data.Bytes()))
-				if c.closeHandle != nil {
-					c.closeHandle(c.r.frame.Data.Bytes())
-				} else {
-					msg := []byte("server receive close frame and send close frame")
-					c.w.frame = &Frame{
-						Fin:        true,
-						Rsv:        [3]bool{},
-						OpCode:     PayloadTypeClose,
-						Mask:       false,
-						PayloadLen: uint64(len(msg)),
-						MaskKey:    [4]byte{},
-						Data:       bytes.NewBuffer(msg),
-					}
-					closeErr := c.w.WriteFrame()
-					if closeErr != nil {
-						logrus.Errorf("[ReadFrame]: write close frame err = %v", closeErr)
-					}
-					c.Close()
-					return n, nil
-				}
-			default:
-				panic("unsupported payload type")
+func (c Conn) handleControl() {
+	switch c.r.frame.OpCode {
+	case PayloadTypePing:
+		logrus.Infof("[handleControl]: receive ping frame msg = %v", string(c.r.frame.Data.Bytes()))
+		if c.pingHandle != nil {
+			c.pingHandle(c.r.frame.Data.Bytes())
+		} else {
+			// default ping handler
+			c.w.frame = &Frame{
+				Fin:        true,
+				Rsv:        [3]bool{},
+				OpCode:     PayloadTypePong,
+				Mask:       false,
+				PayloadLen: uint64(c.r.frame.Data.Len()),
+				MaskKey:    [4]byte{},
+				Data:       c.r.frame.Data,
+			}
+			pongErr := c.w.WriteFrame()
+			if pongErr != nil {
+				logrus.Errorf("[handleControl]: write pong frame err = %v", pongErr)
 			}
 		}
+	case PayloadTypePong:
+		logrus.Infof("[handleControl]: receive pong frame msg = %v", string(c.r.frame.Data.Bytes()))
+		if c.pongHandle != nil {
+			c.pongHandle(c.r.frame.Data.Bytes())
+		} else {
+			// default pong handler
+			logrus.Infof("[handleControl]: default pong handler is nil")
+		}
+	case PayloadTypeClose:
+		logrus.Infof("[handleControl]: receive close frame msg = %v", string(c.r.frame.Data.Bytes()))
+		if c.closeHandle != nil {
+			c.closeHandle(c.r.frame.Data.Bytes())
+		} else {
+			msg := "server receive close frame and send close frame"
+			c.w.frame = &Frame{
+				Fin:        true,
+				Rsv:        [3]bool{},
+				OpCode:     PayloadTypeClose,
+				Mask:       false,
+				PayloadLen: uint64(len(msg)),
+				MaskKey:    [4]byte{},
+				Data:       bytes.NewBuffer(FormatCloseMessage(CloseNormalClosure, msg)),
+			}
+			closeErr := c.w.WriteFrame()
+			if closeErr != nil {
+				logrus.Errorf("[handleControl]: write close frame err = %v", closeErr)
+			}
+			c.Close()
+		}
+	default:
+		panic("unsupported payload type")
 	}
 }
 
@@ -161,4 +166,18 @@ func (c Conn) SetPongHandle(f func(msg []byte) error) {
 
 func (c Conn) SetCloseHandle(f func(msg []byte) error) {
 	c.closeHandle = f
+}
+
+
+func FormatCloseMessage(closeCode int, text string) []byte {
+	if closeCode == CloseNoStatusReceived {
+		// Return empty message because it's illegal to send
+		// CloseNoStatusReceived. Return non-nil value in case application
+		// checks for nil.
+		return []byte{}
+	}
+	buf := make([]byte, 2+len(text))
+	binary.BigEndian.PutUint16(buf, uint16(closeCode))
+	copy(buf[2:], text)
+	return buf
 }
