@@ -15,6 +15,12 @@ var (
 )
 
 const (
+	FragmentBegin  int = 0
+	FragmentMiddle int = 1
+	FragmentEnd    int = 2
+)
+
+const (
 	PayloadTypeContinue byte = 0x0
 	PayloadTypeText     byte = 0x1
 	PayloadTypeBinary   byte = 0x2

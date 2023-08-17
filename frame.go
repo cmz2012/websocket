@@ -7,6 +7,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"io"
 	"math"
+	"math/rand"
 )
 
 type Frame struct {
@@ -174,4 +175,34 @@ func (fw *FrameWriter) WriteFrame() (err error) {
 		return
 	}
 	return fw.buf.Flush()
+}
+
+func (fw *FrameWriter) NewFrame(status int, payloadType byte, data []byte) {
+	frame := &Frame{
+		Fin:        status == FragmentEnd,
+		Rsv:        [3]bool{},
+		OpCode:     payloadType,
+		Mask:       fw.NeedMaskSet,
+		PayloadLen: uint64(len(data)),
+		MaskKey:    [4]byte{},
+		Data:       nil,
+	}
+	if status == FragmentMiddle {
+		frame.OpCode = PayloadTypeContinue
+	}
+
+	if frame.Mask {
+		// generate random mask key
+		binary.BigEndian.PutUint32(frame.MaskKey[:4], rand.Uint32())
+	}
+	bf := bytes.NewBuffer(nil)
+	for i := 0; i < len(data); i++ {
+		if frame.Mask {
+			bf.WriteByte(data[i] ^ frame.MaskKey[i%4])
+		} else {
+			bf.WriteByte(data[i])
+		}
+	}
+	frame.Data = bf
+	fw.frame = frame
 }

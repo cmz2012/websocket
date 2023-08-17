@@ -6,7 +6,6 @@ import (
 	"errors"
 	"github.com/sirupsen/logrus"
 	"io"
-	"math/rand"
 	"net"
 )
 
@@ -121,29 +120,7 @@ func (c Conn) Write(p []byte) (n int, err error) {
 		if pSize-n < size {
 			size = pSize - n
 		}
-		frame := &Frame{
-			Fin:        (n + size) >= pSize,
-			Rsv:        [3]bool{},
-			OpCode:     PayloadTypeText,
-			Mask:       c.w.NeedMaskSet,
-			PayloadLen: uint64(size),
-			MaskKey:    [4]byte{},
-			Data:       nil,
-		}
-		if frame.Mask {
-			// generate random mask key
-			binary.BigEndian.PutUint32(frame.MaskKey[:4], rand.Uint32())
-		}
-		bf := bytes.NewBuffer(nil)
-		for i := 0; i < size; i++ {
-			if frame.Mask {
-				bf.WriteByte(p[n+i] ^ frame.MaskKey[i%4])
-			} else {
-				bf.WriteByte(p[n+i])
-			}
-		}
-		frame.Data = bf
-		c.w.frame = frame
+		c.w.NewFrame(getFragmentStatus(n, size, pSize), PayloadTypeText, p[n:n+size])
 
 		err = c.w.WriteFrame()
 		if err != nil {
@@ -154,24 +131,45 @@ func (c Conn) Write(p []byte) (n int, err error) {
 	return n, nil
 }
 
-func (c Conn) WriteControl(payloadType byte, msg string) (err error) {
+func (c Conn) WriteMessage(payloadType byte, p []byte) (n int, err error) {
+	if isControlFrame(payloadType) {
+		err = errors.New("must not be control frame")
+		return
+	}
+
+	size := c.w.MaxFrameSize
+	if size <= 0 {
+		size = DefaultFrameSize
+	}
+	pSize := len(p)
+	for n < pSize {
+		// generate new frame, compute the frame size
+		if pSize-n < size {
+			size = pSize - n
+		}
+		c.w.NewFrame(getFragmentStatus(n, size, pSize), payloadType, p[n:n+size])
+
+		err = c.w.WriteFrame()
+		if err != nil {
+			return
+		}
+		n += size
+	}
+	return n, nil
+}
+
+func (c Conn) WriteControl(payloadType byte, data []byte) (err error) {
 	if !isControlFrame(payloadType) {
 		return errors.New("not control frame")
 	}
-	c.w.frame = &Frame{
-		Fin:        true,
-		Rsv:        [3]bool{},
-		OpCode:     payloadType,
-		Mask:       false,
-		PayloadLen: uint64(len(msg)),
-		MaskKey:    [4]byte{},
-		Data:       nil,
-	}
+	var msg []byte
 	if payloadType == PayloadTypeClose {
-		c.w.frame.Data = bytes.NewBuffer(FormatCloseMessage(CloseNormalClosure, msg))
+		msg = FormatCloseMessage(CloseNormalClosure, string(data))
 	} else {
-		c.w.frame.Data = bytes.NewBuffer([]byte(msg))
+		msg = data
 	}
+	c.w.NewFrame(FragmentEnd, payloadType, msg)
+
 	err = c.w.WriteFrame()
 	return
 }
