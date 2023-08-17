@@ -46,12 +46,12 @@ func (up *Upgrader) writeShakeBadResponse(buf *bufio.ReadWriter) {
 	logrus.Errorf("[Upgrade]: writeShakeBadResponse")
 }
 
-func (up *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (cn Conn, err error) {
+func (up *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (cn *Conn, err error) {
 	conn, buf, err := w.(http.Hijacker).Hijack()
 	if err != nil {
 		panic(err)
 	}
-	cn = Conn{
+	cn = &Conn{
 		r: FrameReader{
 			frame:       nil,
 			buf:         buf.Reader,

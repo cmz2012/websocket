@@ -1,7 +1,6 @@
 package websocket
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"github.com/sirupsen/logrus"
@@ -20,12 +19,13 @@ type Conn struct {
 }
 
 // 从buf reader读取字节流生成frame，然后从frame的buffer读取
-func (c Conn) Read(p []byte) (n int, err error) {
+func (c *Conn) Read(p []byte) (n int, err error) {
 	for {
 		if c.r.frame != nil && c.r.frame.Data != nil {
 			// read from buffer first
 			var cnt int
-			cnt, err = c.r.frame.Data.Read(p[n:])
+
+			cnt, err = c.r.Read(p[n:])
 			n += cnt
 
 			if n == len(p) || (err != nil && err != io.EOF) {
@@ -47,12 +47,12 @@ func (c Conn) Read(p []byte) (n int, err error) {
 
 		if isControlFrame(c.r.frame.OpCode) {
 			c.handleControl()
-			c.r.clear()
+			c.r.RefreshFrame(nil)
 		}
 	}
 }
 
-func (c Conn) handleControl() {
+func (c *Conn) handleControl() {
 	switch c.r.frame.OpCode {
 	case PayloadTypePing:
 		logrus.Infof("[handleControl]: receive ping frame msg = %v", string(c.r.frame.Data.Bytes()))
@@ -60,15 +60,7 @@ func (c Conn) handleControl() {
 			c.pingHandle(c.r.frame.Data.Bytes())
 		} else {
 			// default ping handler
-			c.w.frame = &Frame{
-				Fin:        true,
-				Rsv:        [3]bool{},
-				OpCode:     PayloadTypePong,
-				Mask:       false,
-				PayloadLen: uint64(c.r.frame.Data.Len()),
-				MaskKey:    [4]byte{},
-				Data:       c.r.frame.Data,
-			}
+			c.w.NewFrame(FragmentEnd, PayloadTypePong, c.r.frame.Data.Bytes())
 			pongErr := c.w.WriteFrame()
 			if pongErr != nil {
 				logrus.Errorf("[handleControl]: write pong frame err = %v", pongErr)
@@ -89,15 +81,7 @@ func (c Conn) handleControl() {
 			c.closeHandle(c.r.frame.Data.Bytes())
 		} else {
 			msg := "server receive close frame and send close frame"
-			c.w.frame = &Frame{
-				Fin:        true,
-				Rsv:        [3]bool{},
-				OpCode:     PayloadTypeClose,
-				Mask:       false,
-				PayloadLen: uint64(len(msg)),
-				MaskKey:    [4]byte{},
-				Data:       bytes.NewBuffer(FormatCloseMessage(CloseNormalClosure, msg)),
-			}
+			c.w.NewFrame(FragmentEnd, PayloadTypeClose, FormatCloseMessage(CloseNormalClosure, msg))
 			closeErr := c.w.WriteFrame()
 			if closeErr != nil {
 				logrus.Errorf("[handleControl]: write close frame err = %v", closeErr)
@@ -109,7 +93,7 @@ func (c Conn) handleControl() {
 	}
 }
 
-func (c Conn) Write(p []byte) (n int, err error) {
+func (c *Conn) Write(p []byte) (n int, err error) {
 	size := c.w.MaxFrameSize
 	if size <= 0 {
 		size = DefaultFrameSize
@@ -131,7 +115,7 @@ func (c Conn) Write(p []byte) (n int, err error) {
 	return n, nil
 }
 
-func (c Conn) WriteMessage(payloadType byte, p []byte) (n int, err error) {
+func (c *Conn) WriteMessage(payloadType byte, p []byte) (n int, err error) {
 	if isControlFrame(payloadType) {
 		err = errors.New("must not be control frame")
 		return
@@ -158,7 +142,7 @@ func (c Conn) WriteMessage(payloadType byte, p []byte) (n int, err error) {
 	return n, nil
 }
 
-func (c Conn) WriteControl(payloadType byte, data []byte) (err error) {
+func (c *Conn) WriteControl(payloadType byte, data []byte) (err error) {
 	if !isControlFrame(payloadType) {
 		return errors.New("not control frame")
 	}
@@ -174,19 +158,19 @@ func (c Conn) WriteControl(payloadType byte, data []byte) (err error) {
 	return
 }
 
-func (c Conn) Close() error {
+func (c *Conn) Close() error {
 	return c.nc.Close()
 }
 
-func (c Conn) SetPingHandle(f func(msg []byte) error) {
+func (c *Conn) SetPingHandle(f func(msg []byte) error) {
 	c.pingHandle = f
 }
 
-func (c Conn) SetPongHandle(f func(msg []byte) error) {
+func (c *Conn) SetPongHandle(f func(msg []byte) error) {
 	c.pongHandle = f
 }
 
-func (c Conn) SetCloseHandle(f func(msg []byte) error) {
+func (c *Conn) SetCloseHandle(f func(msg []byte) error) {
 	c.closeHandle = f
 }
 

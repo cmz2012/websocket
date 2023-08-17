@@ -2,9 +2,9 @@ package websocket
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/binary"
 	"github.com/sirupsen/logrus"
+	"github.com/valyala/bytebufferpool"
 	"io"
 	"math"
 	"math/rand"
@@ -17,7 +17,7 @@ type Frame struct {
 	Mask       bool
 	PayloadLen uint64
 	MaskKey    [4]byte
-	Data       *bytes.Buffer
+	Data       *bytebufferpool.ByteBuffer
 }
 
 type FrameReader struct {
@@ -78,7 +78,7 @@ func (fr *FrameReader) ReadFrame() (err error) {
 		}
 	}
 
-	fr.frame = &frame
+	fr.RefreshFrame(&frame)
 
 	// decode byte read from buf
 	err = fr.Decode()
@@ -91,7 +91,7 @@ func (fr *FrameReader) ReadFrame() (err error) {
 }
 
 func (fr *FrameReader) Decode() (err error) {
-	bf := bytes.NewBuffer(nil)
+	bf := bytebufferpool.Get()
 	index := uint64(0)
 	// read PayloadLen byte
 	for index < fr.frame.PayloadLen {
@@ -109,6 +109,30 @@ func (fr *FrameReader) Decode() (err error) {
 	}
 	fr.frame.Data = bf
 	return
+}
+
+func (fr *FrameReader) Read(p []byte) (n int, err error) {
+	if fr.frame == nil || fr.frame.Data == nil {
+		return 0, io.EOF
+	}
+	n = copy(p, fr.frame.Data.B)
+	fr.frame.Data.B = fr.frame.Data.B[n:]
+	if n == 0 {
+		if len(p) == 0 {
+			return 0, nil
+		}
+		return 0, io.EOF
+	}
+	return
+}
+
+func (fr *FrameReader) RefreshFrame(f *Frame) {
+	// put the old frame's data into buffer pool
+	if fr.frame != nil && fr.frame.Data != nil {
+		fr.frame.Data.Reset()
+		bytebufferpool.Put(fr.frame.Data)
+	}
+	fr.frame = f
 }
 
 func (fr *FrameReader) clear() {
@@ -170,11 +194,20 @@ func (fw *FrameWriter) WriteFrame() (err error) {
 	}
 
 	// data
-	_, err = fw.buf.ReadFrom(fw.frame.Data)
+	_, err = fw.frame.Data.WriteTo(fw.buf)
 	if err != nil {
 		return
 	}
 	return fw.buf.Flush()
+}
+
+func (fw *FrameWriter) RefreshFrame(f *Frame) {
+	// put the old frame's data into buffer pool
+	if fw.frame != nil && fw.frame.Data != nil {
+		fw.frame.Data.Reset()
+		bytebufferpool.Put(fw.frame.Data)
+	}
+	fw.frame = f
 }
 
 func (fw *FrameWriter) NewFrame(status int, payloadType byte, data []byte) {
@@ -195,7 +228,7 @@ func (fw *FrameWriter) NewFrame(status int, payloadType byte, data []byte) {
 		// generate random mask key
 		binary.BigEndian.PutUint32(frame.MaskKey[:4], rand.Uint32())
 	}
-	bf := bytes.NewBuffer(nil)
+	bf := bytebufferpool.Get()
 	for i := 0; i < len(data); i++ {
 		if frame.Mask {
 			bf.WriteByte(data[i] ^ frame.MaskKey[i%4])
@@ -204,5 +237,5 @@ func (fw *FrameWriter) NewFrame(status int, payloadType byte, data []byte) {
 		}
 	}
 	frame.Data = bf
-	fw.frame = frame
+	fw.RefreshFrame(frame)
 }
