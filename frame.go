@@ -135,10 +135,6 @@ func (fr *FrameReader) RefreshFrame(f *Frame) {
 	fr.frame = f
 }
 
-func (fr *FrameReader) clear() {
-	fr.frame = nil
-}
-
 type FrameWriter struct {
 	frame        *Frame
 	buf          *bufio.Writer

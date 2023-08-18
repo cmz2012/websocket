@@ -52,6 +52,37 @@ func (c *Conn) Read(p []byte) (n int, err error) {
 	}
 }
 
+func (c *Conn) ReadMessage() (msg []byte, payloadType byte, err error) {
+	// return the first non-control frame
+	for {
+		if c.r.frame != nil && c.r.frame.Data != nil {
+			// discard the remaining bytes
+			c.r.frame.Data.WriteTo(io.Discard)
+		}
+
+		// read the next frame from buf
+		err = c.r.ReadFrame()
+
+		if err != nil {
+			return
+		}
+
+		if isControlFrame(c.r.frame.OpCode) {
+			c.handleControl()
+			c.r.RefreshFrame(nil)
+		} else if !c.r.frame.Fin {
+			err = errors.New("must not be fragment")
+			return
+		} else {
+			break
+		}
+	}
+	msg = make([]byte, len(c.r.frame.Data.Bytes()))
+	copy(msg, c.r.frame.Data.Bytes())
+	payloadType = c.r.frame.OpCode
+	return
+}
+
 func (c *Conn) handleControl() {
 	switch c.r.frame.OpCode {
 	case PayloadTypePing:
