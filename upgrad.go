@@ -2,11 +2,13 @@ package websocket
 
 import (
 	"bufio"
+	"crypto/rand"
 	"crypto/sha1"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"github.com/sirupsen/logrus"
+	"io"
 	"net/http"
 	"net/url"
 )
@@ -15,6 +17,7 @@ type Upgrader struct {
 	websocketKey string
 	accept       string
 	url          *url.URL
+	IsServer     bool
 }
 
 func (up *Upgrader) getKeyAccept(nonce []byte) (expected []byte, err error) {
@@ -28,6 +31,20 @@ func (up *Upgrader) getKeyAccept(nonce []byte) (expected []byte, err error) {
 	expected = make([]byte, 28)
 	base64.StdEncoding.Encode(expected, h.Sum(nil))
 	return
+}
+
+func (up *Upgrader) generateKey() error {
+	// 1. 16-byte value
+	p := make([]byte, 16)
+
+	// 2. Randomly selected
+	if _, err := io.ReadFull(rand.Reader, p); err != nil {
+		return err
+	}
+
+	// 3. Base64-encoded
+	up.websocketKey = base64.StdEncoding.EncodeToString(p)
+	return nil
 }
 
 func (up *Upgrader) writeShakeSuccessResponse(buf *bufio.ReadWriter) {
@@ -46,6 +63,28 @@ func (up *Upgrader) writeShakeBadResponse(buf *bufio.ReadWriter) {
 	logrus.Errorf("[Upgrade]: writeShakeBadResponse")
 }
 
+func (up *Upgrader) Connect(buf *bufio.Writer) (err error) {
+	fmt.Fprintf(buf, "GET %s HTTP/1.1\r\n", up.url.Path)
+	fmt.Fprintf(buf, "Host: %s\r\n", up.url.Host)
+	fmt.Fprintf(buf, "Upgrade: websocket\r\n")
+	fmt.Fprintf(buf, "Connection: Upgrade\r\n")
+	fmt.Fprintf(buf, "Sec-WebSocket-Key: %s\r\n", up.websocketKey)
+	fmt.Fprintf(buf, "\r\n")
+	return buf.Flush()
+}
+
+func (up *Upgrader) CheckShakeResp(rsp *http.Response) (err error) {
+	if rsp.StatusCode != http.StatusSwitchingProtocols {
+		return errors.New(fmt.Sprintf("status code: %d", rsp.StatusCode))
+	}
+	header := rsp.Header
+
+	if header.Get("Upgrade") != "websocket" || header.Get("Connection") != "Upgrade" || header.Get("Sec-WebSocket-Accept") != up.accept {
+		return errors.New("header error")
+	}
+	return
+}
+
 func (up *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (cn *Conn, err error) {
 	conn, buf, err := w.(http.Hijacker).Hijack()
 	if err != nil {
@@ -55,12 +94,12 @@ func (up *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request) (cn *Conn, e
 		r: FrameReader{
 			frame:       nil,
 			buf:         buf.Reader,
-			NeedMaskSet: true,
+			NeedMaskSet: up.IsServer,
 		},
 		w: FrameWriter{
 			frame:       nil,
 			buf:         buf.Writer,
-			NeedMaskSet: false,
+			NeedMaskSet: !up.IsServer,
 		},
 		nc: conn,
 	}

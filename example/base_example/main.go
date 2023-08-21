@@ -21,7 +21,7 @@ func HandConn(rwc *websocket.Conn) {
 }
 
 func socketHandler(w http.ResponseWriter, r *http.Request) {
-	up := &websocket.Upgrader{}
+	up := &websocket.Upgrader{IsServer: true}
 	rwc, err := up.Upgrade(w, r)
 	if err != nil {
 		logrus.Infoln(err)
