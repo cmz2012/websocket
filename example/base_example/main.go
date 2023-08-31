@@ -5,19 +5,22 @@ import (
 	"github.com/cmz2012/websocket"
 	"github.com/sirupsen/logrus"
 	"net/http"
+	"time"
 )
 
 func HandConn(rwc *websocket.Conn) {
 	defer rwc.Close()
-	msg := make([]byte, 10)
-	rwc.WriteControl(websocket.PayloadTypePing, []byte("this is a ping frame"))
-	n, err := rwc.Read(msg)
-	fmt.Printf("ReadString1: %v, %v, %v\n", string(msg), err, n)
-	msg = make([]byte, 10)
-	n, err = rwc.Read(msg)
-	fmt.Printf("ReadString2: %v, %v, %v\n", string(msg), err, n)
-	n, err = rwc.Write([]byte("hello, client!"))
-	fmt.Printf("WriteString: %v, %v", n, err)
+	go func() {
+		cnt := 1
+		for {
+			time.Sleep(5 * time.Second)
+			s := fmt.Sprintf("ping number: %v", cnt)
+			rwc.WriteControl(websocket.PayloadTypePing, []byte(s))
+			cnt++
+		}
+	}()
+	msg, t, err := rwc.ReadMessage()
+	fmt.Println(string(msg), t, err)
 }
 
 func socketHandler(w http.ResponseWriter, r *http.Request) {
@@ -33,7 +36,8 @@ func socketHandler(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	http.HandleFunc("/echo", socketHandler)
-	err := http.ListenAndServe(":12345", nil)
+	//err := http.ListenAndServe(":12345", nil)
+	err := http.ListenAndServeTLS(":12345", "server.crt", "server.key", nil)
 	if err != nil {
 		panic("ListenAndServe: " + err.Error())
 	}

@@ -2,6 +2,8 @@ package websocket
 
 import (
 	"bufio"
+	"crypto/tls"
+	"errors"
 	"github.com/sirupsen/logrus"
 	"net"
 	"net/http"
@@ -33,14 +35,32 @@ func Dial(rawUrl string) (c *Conn, err error) {
 	upgrader.accept = string(accept)
 
 	// tcp connection
-	conn, err := net.Dial("tcp", _url.Host)
-	if err != nil {
-		logrus.Errorf("[Dial]: host = %v, err = %v", _url.Host, err)
+	var reader *bufio.Reader
+	var writer *bufio.Writer
+	var conn net.Conn
+	switch _url.Scheme {
+	case "ws":
+		conn, err = net.Dial("tcp", _url.Host)
+		if err != nil {
+			logrus.Errorf("[Dial tcp]: host = %v, err = %v", _url.Host, err)
+			return
+		}
+		logrus.Infof("[Dial tcp]: connected remote = %v", conn.RemoteAddr().String())
+		reader = bufio.NewReader(conn)
+		writer = bufio.NewWriter(conn)
+	case "wss":
+		conn, err = tls.Dial("tcp", _url.Host, &tls.Config{InsecureSkipVerify: true})
+		if err != nil {
+			logrus.Errorf("[Dial tls]: host = %v, err = %v", _url.Host, err)
+			return nil, err
+		}
+		logrus.Infof("[Dial tls]: connected remote = %v", conn.RemoteAddr().String())
+		reader = bufio.NewReader(conn)
+		writer = bufio.NewWriter(conn)
+	default:
+		err = errors.New("scheme error")
 		return
 	}
-	logrus.Infof("[Dial]: tcp connected remote = %v", conn.RemoteAddr().String())
-	reader := bufio.NewReader(conn)
-	writer := bufio.NewWriter(conn)
 
 	// http upgrade
 	err = upgrader.Connect(writer)
